@@ -9,8 +9,13 @@ from telethon.tl.types import InputMessagesFilterMusic
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
+# CHANNEL_ID int yoki str bo'lishini avtomatik aniqlash
+RAW_CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+if RAW_CHANNEL_ID.startswith("-") or RAW_CHANNEL_ID.isdigit():
+    CHANNEL_ID = int(RAW_CHANNEL_ID)
+else:
+    CHANNEL_ID = RAW_CHANNEL_ID
 
 # Telethon mijozini (Bot rejimida) yaratish
 bot = TelegramClient('music_bot_session', API_ID, API_HASH)
@@ -38,7 +43,6 @@ async def start_cmd(event):
 
 @bot.on(events.NewMessage)
 async def search_handler(event):
-    # Buyruqlarni o'tkazib yuborish
     if event.text.startswith('/'):
         return
 
@@ -72,9 +76,9 @@ async def search_handler(event):
             await event.respond("❌ Afsuski, kanaldan bunday musiqa topilmadi.")
 
     except Exception as e:
-        print(f"Qidiruvda xatolik: {e}")
+        print(f"QIDIRUVDA ANIQLANGAN XATOLIK: {e}")
         await status_msg.delete()
-        await event.respond("⚠️ Qidiruv jarayonida xatolik yuz berdi.")
+        await event.respond(f"⚠️ Xatolik yuz berdi:\n`{e}`")
 
 async def main():
     await bot.start(bot_token=BOT_TOKEN)
