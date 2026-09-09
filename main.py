@@ -3,7 +3,6 @@ import threading
 import asyncio
 from flask import Flask
 from telethon import TelegramClient, events
-from telethon.tl.types import InputMessagesFilterMusic
 
 # --- ENVIRONMENT VARIABLES (Render'dan o'qiladi) ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -17,7 +16,7 @@ if RAW_CHANNEL_ID.startswith("-") or RAW_CHANNEL_ID.isdigit():
 else:
     CHANNEL_ID = RAW_CHANNEL_ID
 
-# Telethon mijozini (Bot rejimida) yaratish
+# Telethon bot mijozi
 bot = TelegramClient('music_bot_session', API_ID, API_HASH)
 
 # --- RENDER UCHUN FLASK SERVER ---
@@ -55,20 +54,29 @@ async def search_handler(event):
     found_count = 0
 
     try:
-        # Kanaldan real-vaqtda audio fayllarni qidirish (Direct Search)
-        async for message in bot.iter_messages(
-            CHANNEL_ID,
-            search=query,
-            filter=InputMessagesFilterMusic,
-            limit=5
-        ):
-            if message.media:
-                found_count += 1
-                await bot.send_file(
-                    event.chat_id,
-                    file=message.media,
-                    caption=f"🎧 **{message.file.title or 'Musiqa'}** - {message.file.performer or 'Noma\'lum'}"
-                )
+        # Bot API cheklovini aylanib o'tish: Oxirgi 300 ta xabarni tezkor skanerlash
+        async for message in bot.iter_messages(CHANNEL_ID, limit=300):
+            if message.media and message.voice is None:  # Faqat media fayllar
+                # Fayl nomi, performer yoki caption (xabar matni)ni tekshirish
+                title = ""
+                performer = ""
+                caption = message.message.lower() if message.message else ""
+
+                if hasattr(message, 'file') and message.file:
+                    title = (message.file.title or "").lower()
+                    performer = (message.file.performer or "").lower()
+
+                # Izlanayotgan so'z mos kelsa
+                if query in title or query in performer or query in caption:
+                    found_count += 1
+                    await bot.send_file(
+                        event.chat_id,
+                        file=message.media,
+                        caption=f"🎧 **{message.file.title or 'Musiqa'}** - {message.file.performer or 'Noma\'lum'}"
+                    )
+                    
+                    if found_count >= 5:  # Maksimum 5 ta natija yetarli
+                        break
 
         await status_msg.delete()
 
@@ -76,8 +84,11 @@ async def search_handler(event):
             await event.respond("❌ Afsuski, kanaldan bunday musiqa topilmadi.")
 
     except Exception as e:
-        print(f"QIDIRUVDA ANIQLANGAN XATOLIK: {e}")
-        await status_msg.delete()
+        print(f"QIDIRUVDA XATOLIK: {e}")
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
         await event.respond(f"⚠️ Xatolik yuz berdi:\n`{e}`")
 
 async def main():
