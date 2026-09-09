@@ -1,101 +1,100 @@
 import os
 import threading
-import asyncio
+import time
 from flask import Flask
-from telethon import TelegramClient, events
+import telebot
 
-# --- ENVIRONMENT VARIABLES (Render'dan o'qiladi) ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 
-# CHANNEL_ID int yoki str bo'lishini avtomatik aniqlash
-RAW_CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-if RAW_CHANNEL_ID.startswith("-") or RAW_CHANNEL_ID.isdigit():
-    CHANNEL_ID = int(RAW_CHANNEL_ID)
-else:
-    CHANNEL_ID = RAW_CHANNEL_ID
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# Telethon bot mijozi
-bot = TelegramClient('music_bot_session', API_ID, API_HASH)
+# Musiqalarni xotirada saqlash uchun lug'at (In-Memory Database)
+# { message_id: {"title": "...", "performer": "...", "caption": "..."} }
+music_index = {}
 
-# --- RENDER UCHUN FLASK SERVER ---
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Music Bot is running live via Telethon!"
+    return "Music Bot is running!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# --- BOT HANDLERLARI ---
-@bot.on(events.NewMessage(pattern='/start'))
-async def start_cmd(event):
+# START BUYRUG'I
+@bot.message_handler(commands=["start"])
+def start_cmd(message):
     welcome_text = (
-        f"Salom, **{event.sender.first_name or 'Foydalanuvchi'}**! 🎧\n\n"
-        "Men toza va juda tezkor **Music Bot**man.\n\n"
-        "🔹 Qo'shiq nomi yoki ijrochi ismini yozing, men uni kanaldan darhol topib beraman!"
+        f"Salom, **{message.from_user.first_name}**! 🎧\n\n"
+        "Men tezkor **Music Bot**man.\n\n"
+        "🔹 Qo'shiq nomi yoki ijrochi ismini yozing, men uni kanaldan topib beraman!"
     )
-    await event.respond(welcome_text)
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
-@bot.on(events.NewMessage)
-async def search_handler(event):
-    if event.text.startswith('/'):
-        return
+# KANALGA YANGI MUSIQA TUSHDANIDA UNI INDEKSGA QO'SHISH
+@bot.channel_post_handler(content_types=["audio"])
+def handle_channel_audio(message):
+    if message.chat.id == CHANNEL_ID and message.audio:
+        title = (message.audio.title or "").lower()
+        performer = (message.audio.performer or "").lower()
+        caption = (message.caption or "").lower()
 
-    query = event.text.strip().lower()
+        music_index[message.message_id] = {
+            "title": title,
+            "performer": performer,
+            "caption": caption
+        }
+        print(f"Yangi musiqa indekslandi: {message.message_id}")
+
+# FOYDALANUVCHI QIDIRGANDA
+@bot.message_handler(func=lambda msg: True)
+def search_music(message):
+    query = message.text.strip().lower()
+
     if len(query) < 2:
-        await event.respond("⚠️ Qidirish uchun kamida 2 ta harf kiriting!")
+        bot.send_message(message.chat.id, "⚠️ Qidirish uchun kamida 2 ta harf kiriting!")
         return
 
-    status_msg = await event.respond("🔍 Kanaldan qidirilmoqda...")
+    status_msg = bot.send_message(message.chat.id, "🔍 Kanaldan qidirilmoqda...")
     found_count = 0
 
+    # Saqlangan musiqalar orasidan qidirish
+    for msg_id, data in list(music_index.items()):
+        if query in data["title"] or query in data["performer"] or query in data["caption"]:
+            try:
+                bot.copy_message(
+                    chat_id=message.chat.id,
+                    from_chat_id=CHANNEL_ID,
+                    message_id=msg_id
+                )
+                found_count += 1
+                if found_count >= 5:
+                    break
+            except Exception as e:
+                print(f"Musiqa yuborishda xatolik: {e}")
+
     try:
-        # Bot API cheklovini aylanib o'tish: Oxirgi 300 ta xabarni tezkor skanerlash
-        async for message in bot.iter_messages(CHANNEL_ID, limit=300):
-            if message.media and message.voice is None:  # Faqat media fayllar
-                # Fayl nomi, performer yoki caption (xabar matni)ni tekshirish
-                title = ""
-                performer = ""
-                caption = message.message.lower() if message.message else ""
+        bot.delete_message(message.chat.id, status_msg.message_id)
+    except Exception:
+        pass
 
-                if hasattr(message, 'file') and message.file:
-                    title = (message.file.title or "").lower()
-                    performer = (message.file.performer or "").lower()
-
-                # Izlanayotgan so'z mos kelsa
-                if query in title or query in performer or query in caption:
-                    found_count += 1
-                    await bot.send_file(
-                        event.chat_id,
-                        file=message.media,
-                        caption=f"🎧 **{message.file.title or 'Musiqa'}** - {message.file.performer or 'Noma\'lum'}"
-                    )
-                    
-                    if found_count >= 5:  # Maksimum 5 ta natija yetarli
-                        break
-
-        await status_msg.delete()
-
-        if found_count == 0:
-            await event.respond("❌ Afsuski, kanaldan bunday musiqa topilmadi.")
-
-    except Exception as e:
-        print(f"QIDIRUVDA XATOLIK: {e}")
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-        await event.respond(f"⚠️ Xatolik yuz berdi:\n`{e}`")
-
-async def main():
-    await bot.start(bot_token=BOT_TOKEN)
-    print("Telethon Live Search Bot muvaffaqiyatli ishga tushdi...")
-    await bot.run_until_disconnected()
+    if found_count == 0:
+        bot.send_message(
+            message.chat.id, 
+            "❌ Afsuski, kanaldan bunday musiqa topilmadi.\n\n"
+            "💡 *Eslatma: Bot faqat u ishga tushganidan keyin va kanalga yangi joylangan musiqalarni qidira oladi.*",
+            parse_mode="Markdown"
+        )
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
-    asyncio.run(main())
+    print("Bot ishga tushdi...")
+    
+    while True:
+        try:
+            bot.polling(non_stop=True, interval=1, timeout=30)
+        except Exception as e:
+            print(f"Xatolik: {e}")
+            time.sleep(5)
