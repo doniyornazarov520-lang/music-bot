@@ -90,7 +90,7 @@ def add_music_auto(message):
 
 # YUKLASH VA KANALGA JOYLASHQAN FUNKSIYA
 def download_and_post(song_name, user_chat_id):
-    status = bot.send_message(user_chat_id, f"📥 **'{song_name}'** internetdan qidirilmoqda va yuklanmoqda...")
+    status = bot.send_message(user_chat_id, f"📥 **'{song_name}'** qidirilmoqda va yuklanmoqda...")
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -117,7 +117,7 @@ def download_and_post(song_name, user_chat_id):
             title = info.get("title", "Musiqa")
             uploader = info.get("uploader", "Unknown")
 
-        bot.edit_message_text(f"📤 Kanalga va sizga yuborilmoqda: **{title}**", user_chat_id, status.message_id, parse_mode="Markdown")
+        bot.edit_message_text(f"📤 Sizga yuborilmoqda: **{title}**", user_chat_id, status.message_id, parse_mode="Markdown")
 
         # 1. Kanalga yuborish
         with open(filename, "rb") as audio:
