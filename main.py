@@ -89,9 +89,14 @@ def add_music_auto(message):
 
     status = bot.send_message(message.chat.id, f"📥 **'{song_name}'** YouTube'dan qidirilmoqda...")
 
-    ydl_opts = {
+   ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': 'song.%(ext)s',
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'web_creator']
+            }
+        },
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
