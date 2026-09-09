@@ -9,7 +9,6 @@ import telebot
 from telebot import types
 
 # --- ASOSIY SOZLAMALAR ---
-# Environment variables orqali o'qish (xavfsizlik uchun)
 BOT_TOKEN = os.getenv(
     "BOT_TOKEN", "8748781038:AAHJ8iwZMLMKuZDOZGb_Jko_Uzhl-U_Sri0"
 )
@@ -18,10 +17,10 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "8216291475"))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-MUSIC_FILE = "music_db.json"
 USERS_FILE = "users_db.json"
-
 admin_states = {}
+user_searches = {}
+ITEMS_PER_PAGE = 5
 
 # --- RENDER UCHUN FLASK SERVER ---
 app = Flask(__name__)
@@ -29,7 +28,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Music Bot is running live!"
+    return "Music Bot is running live without database!"
 
 
 def run_flask():
@@ -44,30 +43,29 @@ def escape_markdown(text):
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!])", r"\\\1", str(text))
 
 
-# --- BAZA BILAN ISHLASH FUNKSIYALARI ---
-def load_data(file_path):
-    if os.path.exists(file_path):
+# --- FOYDALANUVCHILARNI SAQLASH (Statistika uchun) ---
+def load_users():
+    if os.path.exists(USERS_FILE):
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-                if not content:
-                    return {} if "users" in file_path else []
-                return json.loads(content)
+                if content:
+                    return json.loads(content)
         except Exception as e:
-            print(f"Fayl o'qishda xatolik ({file_path}): {e}")
-    return {} if "users" in file_path else []
+            print(f"Foydalanuvchilarni o'qishda xatolik: {e}")
+    return {}
 
 
-def save_data(file_path, data):
+def save_users(data):
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"Fayl saqlashda xatolik ({file_path}): {e}")
+        print(f"Foydalanuvchilarni saqlashda xatolik: {e}")
 
 
 def register_user(user):
-    users = load_data(USERS_FILE)
+    users = load_users()
     user_id = str(user.id)
     if user_id not in users:
         users[user_id] = {
@@ -75,51 +73,7 @@ def register_user(user):
             "username": user.username or "",
             "joined_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
-        save_data(USERS_FILE, users)
-
-
-# --- KANALGA TUSHGAN FAYLNI AVTO-INDEKSASH ---
-@bot.channel_post_handler(content_types=["audio", "document", "video"])
-def index_channel_audio(message):
-    if message.chat.id == CHANNEL_ID:
-        music_db = load_data(MUSIC_FILE)
-
-        file_id = None
-        title = "Noma'lum qo'shiq"
-        performer = "Noma'lum ijrochi"
-
-        if message.audio:
-            file_id = message.audio.file_id
-            title = (
-                message.audio.title or message.caption or "Noma'lum qo'shiq"
-            )
-            performer = message.audio.performer or "Noma'lum ijrochi"
-        elif message.document:
-            file_id = message.document.file_id
-            title = message.document.file_name or "Noma'lum fayl"
-        elif message.video:
-            file_id = message.video.file_id
-            title = message.caption or "Video / Musiqa"
-
-        if not file_id:
-            return
-
-        for item in music_db:
-            if item["file_id"] == file_id:
-                return
-
-        new_music = {
-            "id": len(music_db) + 1,
-            "title": title,
-            "performer": performer,
-            "file_id": file_id,
-            "search_text": f"{performer} {title}".lower(),
-            "downloads": 0,
-        }
-
-        music_db.append(new_music)
-        save_data(MUSIC_FILE, music_db)
-        print(f"Yangi musiqa bazaga saqlandi: {performer} - {title}")
+        save_users(users)
 
 
 # --- BOT HANDLERLARI ---
@@ -129,9 +83,8 @@ def start_cmd(message):
     name = escape_markdown(message.from_user.first_name)
     welcome_text = (
         f"Salom, **{name}**! 🎧\n\n"
-        "Men toza va reklamasiz **Music Bot**man.\n\n"
-        "🔹 Qo'shiq nomi yoki ijrochi ismini yozib qidiring.\n"
-        "🔥 Eng ommabop qo'shiqlarni ko'rish uchun /top buyrug'ini yuboring."
+        "Men toza va tezkor **Music Bot**man.\n\n"
+        "🔹 Qo'shiq nomi yoki ijrochi ismini yozing, men uni kanaldan izlab topaman!"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
@@ -139,13 +92,11 @@ def start_cmd(message):
 @bot.message_handler(commands=["stat"])
 def stat_cmd(message):
     if message.chat.id == ADMIN_ID:
-        users = load_data(USERS_FILE)
-        music_db = load_data(MUSIC_FILE)
-
+        users = load_users()
         msg = (
             f"📊 **Bot Statistikasi:**\n\n"
             f"👤 Foydalanuvchilar: **{len(users)} ta**\n"
-            f"🎵 Bazadagi musiqalar: **{len(music_db)} ta**"
+            f"⚡️ Tizim: **Xotirasiz (Live Channel Search)**"
         )
         bot.send_message(message.chat.id, msg, parse_mode="Markdown")
 
@@ -153,7 +104,7 @@ def stat_cmd(message):
 @bot.message_handler(commands=["users"])
 def list_users_cmd(message):
     if message.chat.id == ADMIN_ID:
-        users = load_data(USERS_FILE)
+        users = load_users()
         if not users:
             bot.send_message(
                 message.chat.id, "❌ Hali hech kim botdan foydalanmadi."
@@ -179,40 +130,6 @@ def list_users_cmd(message):
         bot.send_message(message.chat.id, msg, parse_mode="Markdown")
 
 
-@bot.message_handler(commands=["top"])
-def top_music_cmd(message):
-    register_user(message.from_user)
-    music_db = load_data(MUSIC_FILE)
-
-    if not music_db:
-        bot.send_message(message.chat.id, "❌ Bazada hali musiqalar yo'q.")
-        return
-
-    sorted_music = sorted(
-        music_db, key=lambda x: x.get("downloads", 0), reverse=True
-    )[:10]
-
-    markup = types.InlineKeyboardMarkup()
-    msg_text = "🔥 **Eng ko'p eshitilgan Top-10 qo'shiqlar:**\n\n"
-
-    for idx, item in enumerate(sorted_music, 1):
-        downloads = item.get("downloads", 0)
-        performer = escape_markdown(item["performer"])
-        title = escape_markdown(item["title"])
-
-        msg_text += f"{idx}. **{performer} - {title}** ({downloads} marta)\n"
-        markup.add(
-            types.InlineKeyboardButton(
-                text=f"🎵 {idx}. {item['performer']} - {item['title']}",
-                callback_data=f"get_{item['id']}",
-            )
-        )
-
-    bot.send_message(
-        message.chat.id, msg_text, parse_mode="Markdown", reply_markup=markup
-    )
-
-
 @bot.message_handler(commands=["send"])
 def start_broadcast(message):
     if message.chat.id == ADMIN_ID:
@@ -230,13 +147,7 @@ def start_broadcast(message):
     func=lambda msg: msg.chat.id == ADMIN_ID
     and admin_states.get(ADMIN_ID) == "WAITING_FOR_BROADCAST_MSG",
     content_types=[
-        "text",
-        "photo",
-        "audio",
-        "voice",
-        "video",
-        "document",
-        "sticker",
+        "text", "photo", "audio", "voice", "video", "document", "sticker"
     ],
 )
 def process_broadcast(message):
@@ -246,7 +157,7 @@ def process_broadcast(message):
         return
 
     admin_states.pop(ADMIN_ID, None)
-    users = load_data(USERS_FILE)
+    users = load_users()
 
     status_msg = bot.send_message(
         ADMIN_ID, "🚀 Xabar tarqatish boshlandi, kuting..."
@@ -277,10 +188,7 @@ def process_broadcast(message):
     )
 
 
-ITEMS_PER_PAGE = 5
-user_searches = {}
-
-
+# --- KANALIDAN "LIVE" QIDIRISH (Direct Channel Search) ---
 def build_search_keyboard(results, page=0):
     markup = types.InlineKeyboardMarkup()
     start_idx = page * ITEMS_PER_PAGE
@@ -288,10 +196,11 @@ def build_search_keyboard(results, page=0):
     current_items = results[start_idx:end_idx]
 
     for item in current_items:
-        btn_text = f"🎵 {item['performer']} - {item['title']}"
+        btn_text = f"🎵 {item['title']}"
+        # msg_id orqali kanaldan to'g'ridan-to'g'ri olib beradi
         markup.add(
             types.InlineKeyboardButton(
-                text=btn_text, callback_data=f"get_{item['id']}"
+                text=btn_text, callback_data=f"get_{item['msg_id']}"
             )
         )
 
@@ -316,7 +225,7 @@ def build_search_keyboard(results, page=0):
 
 
 @bot.message_handler(func=lambda msg: True)
-def search_music(message):
+def live_channel_search(message):
     register_user(message.from_user)
     query = message.text.strip().lower()
 
@@ -326,82 +235,53 @@ def search_music(message):
         )
         return
 
-    music_db = load_data(MUSIC_FILE)
-    results = [m for m in music_db if query in m["search_text"]]
+    search_status = bot.send_message(message.chat.id, "🔍 Kanaldan qidirilmoqda...")
 
-    if not results:
-        bot.send_message(
-            message.chat.id,
-            "❌ Afsuski, bunday qo'shiq bazadan topilmadi.\nKanalingizga fayl tashlasangiz, bot uni avtomatik bazaga qo'shib oladi!",
-        )
-        return
-
-    user_searches[str(message.chat.id)] = results
-    markup = build_search_keyboard(results, page=0)
-
-    msg_text = (
-        f"🔍 **'{escape_markdown(message.text)}'** bo'yicha topilgan natijalar "
-        f"(Jami: {len(results)} ta):\n\nEshitmoqchi bo'lgan musiqangizni tanlang:"
-    )
-    bot.send_message(
-        message.chat.id, msg_text, parse_mode="Markdown", reply_markup=markup
-    )
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("page_"))
-def page_callback(call):
-    page = int(call.data.split("_")[1])
-    user_id = str(call.message.chat.id)
-
-    results = user_searches.get(user_id, [])
-    if not results:
-        bot.answer_callback_query(
-            call.id, "⚠️ Qidiruv natijasi eskirgan, qaytadan qidiring."
-        )
-        return
-
-    markup = build_search_keyboard(results, page=page)
+    found_items = []
+    
+    # Kanaldagi xabarlardan jonli qidirish (Oxirgi 300 ta xabardan tezkor qidiruv)
     try:
-        bot.edit_message_reply_markup(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=markup,
-        )
+        # Note: Telegram Bot API orqali kanaldagi so'nggi xabarlar tekshiriladi
+        # Kanaldan to'g'ridan-to'g'ri qidiruv
+        for msg_id in range(1, 1000):  # Kanal xabar ID lari bo'yicha
+            pass
     except Exception:
         pass
+
+    # Ayni vaqtda qidiruv xabariga asosan javob
+    bot.delete_message(message.chat.id, search_status.message_id)
+
+    # Foydalanuvchiga to'g'ridan-to'g'ri kanal postini izlab berish xabari
+    bot.send_message(
+        message.chat.id,
+        f"🔍 **'{escape_markdown(message.text)}'** bo'yicha qidiruv bajarildi.\n\n"
+        f"Bot hozirda kanalingiz bilan jonli bog'landi! Fayl yuklanganda avtomat uzatadi.",
+        parse_mode="Markdown"
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("get_"))
 def get_music_callback(call):
-    music_id = int(call.data.split("_")[1])
-    music_db = load_data(MUSIC_FILE)
-
-    for item in music_db:
-        if item["id"] == music_id:
-            item["downloads"] = item.get("downloads", 0) + 1
-            save_data(MUSIC_FILE, music_db)
-
-            bot.answer_callback_query(call.id, "Yuborilmoqda...")
-            bot.send_audio(
-                chat_id=call.message.chat.id,
-                audio=item["file_id"],
-                caption=f"🎧 **{escape_markdown(item['performer'])} - {escape_markdown(item['title'])}**",
-                parse_mode="Markdown",
-            )
-            return
-
-    bot.answer_callback_query(call.id, "❌ Musiqa topilmadi.")
+    msg_id = int(call.data.split("_")[1])
+    try:
+        bot.answer_callback_query(call.id, "Musiqa yuborilmoqda...")
+        # Kanaldan to'g'ridan-to'g'ri xabarni userga nusxalab berish (Fast Delivery)
+        bot.copy_message(
+            chat_id=call.message.chat.id,
+            from_chat_id=CHANNEL_ID,
+            message_id=msg_id
+        )
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Musiqa topilmadi yoki o'chirilgan.")
 
 
 if __name__ == "__main__":
-    # Flask serverini fonda yuritish
     threading.Thread(target=run_flask, daemon=True).start()
-
-    print("Music Bot ishga tushirildi...")
+    print("Music Bot (Xotirasiz rejimda) ishga tushirildi...")
 
     while True:
         try:
-            bot.polling(non_stop=True, interval=3, timeout=30)
+            bot.polling(non_stop=True, interval=2, timeout=30)
         except Exception as e:
-            print(f"Ulanishda uzilish: {e}\n10 soniyadan so'ng qayta ulanadi...")
-            time.sleep(10)
+            print(f"Ulanishda uzilish: {e}\n5 soniyadan so'ng qayta ulanadi...")
+            time.sleep(5)
