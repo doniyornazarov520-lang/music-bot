@@ -69,13 +69,12 @@ def run_flask():
 def start_cmd(message):
     welcome_text = (
         f"Salom, **{message.from_user.first_name}**! 🎧\n\n"
-        "Men avtomatik va tezkor **Music Bot**man.\n\n"
-        "🔹 Qo'shiq nomi yoki artistni yozing, men uni kanaldan topib beraman!\n\n"
-        "💡 *Adminlar uchun:* `/add qo'shiq nomi` - YouTube'dan avto-yuklab kanalga joylash."
+        "Men tezkor va aqlli **Music Bot**man.\n\n"
+        "🔹 Qo'shiq nomi yoki artistni yozing, men uni topib beraman!"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
-# ADMIN UCHUN: Avtomatik yuklab kanalga joylash
+# ADMIN UCHUN QO'LDA YUKLASH BUYRUG'I
 @bot.message_handler(commands=["add"])
 def add_music_auto(message):
     if message.from_user.id != ADMIN_ID:
@@ -84,16 +83,14 @@ def add_music_auto(message):
 
     song_name = message.text.replace("/add", "").strip()
     if not song_name:
-        bot.send_message(
-            message.chat.id,
-            "⚠️ Qo'shiq nomini yozing: `/add Toshkent`",
-            parse_mode="Markdown",
-        )
+        bot.send_message(message.chat.id, "⚠️ Qo'shiq nomini yozing: `/add Toshkent`", parse_mode="Markdown")
         return
 
-    status = bot.send_message(
-        message.chat.id, f"📥 **'{song_name}'** qidirilmoqda..."
-    )
+    download_and_post(song_name, message.chat.id)
+
+# YUKLASH VA KANALGA JOYLASHQAN FUNKSIYA
+def download_and_post(song_name, user_chat_id):
+    status = bot.send_message(user_chat_id, f"📥 **'{song_name}'** internetdan qidirilmoqda va yuklanmoqda...")
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -111,28 +108,18 @@ def add_music_auto(message):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # YouTube va SoundCloud'dan izlash
             try:
-                info = ydl.extract_info(
-                    f"ytsearch1:{song_name}", download=True
-                )["entries"][0]
+                info = ydl.extract_info(f"ytsearch1:{song_name}", download=True)["entries"][0]
             except Exception:
-                # Agar YouTube bloklasa, SoundCloud'ga o'tish
-                info = ydl.extract_info(
-                    f"scsearch1:{song_name}", download=True
-                )["entries"][0]
+                info = ydl.extract_info(f"scsearch1:{song_name}", download=True)["entries"][0]
 
             filename = "song.mp3"
             title = info.get("title", "Musiqa")
             uploader = info.get("uploader", "Unknown")
 
-        bot.edit_message_text(
-            f"📤 Kanalga joylanmoqda: **{title}**",
-            message.chat.id,
-            status.message_id,
-            parse_mode="Markdown",
-        )
+        bot.edit_message_text(f"📤 Kanalga va sizga yuborilmoqda: **{title}**", user_chat_id, status.message_id, parse_mode="Markdown")
 
+        # 1. Kanalga yuborish
         with open(filename, "rb") as audio:
             sent_msg = bot.send_audio(
                 CHANNEL_ID,
@@ -142,20 +129,21 @@ def add_music_auto(message):
                 caption=f"🎧 {title}\n🤖 @{bot.get_me().username}",
             )
 
-        # Bazaga qo'shish
+        # 2. Bazaga yozish
         add_music_to_db(sent_msg.message_id, title, uploader)
+
+        # 3. Foydalanuvchining o'ziga yuborish
+        bot.copy_message(user_chat_id, CHANNEL_ID, sent_msg.message_id)
 
         if os.path.exists(filename):
             os.remove(filename)
 
-        bot.send_message(
-            message.chat.id, "✅ Musiqa kanalga joylandi va bazaga saqlandi!"
-        )
+        bot.delete_message(user_chat_id, status.message_id)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Yuklashda xatolik yuz berdi: {e}")
+        bot.send_message(user_chat_id, f"❌ Musiqa topilmadi yoki yuklashda xatolik bo'ldi.")
 
-# KANALGA QO'LDA MUSIQA TASHLANGANDA HAM BAZAGA YOZISH
+# KANALGA QO'LDA MUSIQA TASHLANGANDA BAZAGA YOZISH
 @bot.channel_post_handler(content_types=["audio"])
 def handle_channel_audio(message):
     if message.chat.id == CHANNEL_ID and message.audio:
@@ -164,30 +152,27 @@ def handle_channel_audio(message):
         caption = message.caption or ""
         add_music_to_db(message.message_id, title, performer, caption)
 
-# QIDIRUV HANDLERI
+# BOSH QIDIRUV HANDLERI (BAZA + INTERNET)
 @bot.message_handler(func=lambda msg: True)
 def search_music(message):
     query = message.text.strip()
     if len(query) < 2 or query.startswith('/'):
         return
 
+    # 1. Avval bazadan izlash
     msg_ids = search_music_in_db(query)
 
-    if not msg_ids:
-        bot.send_message(message.chat.id, "❌ Afsuski, kanaldan bunday musiqa topilmadi.")
-        return
-
-    status = bot.send_message(message.chat.id, "🔍 Musiqa yuborilmoqda...")
-    found = 0
-
-    for m_id in msg_ids[:5]:
-        try:
-            bot.copy_message(message.chat.id, CHANNEL_ID, m_id)
-            found += 1
-        except Exception as e:
-            print(f"Yuborishda xatolik: {e}")
-
-    bot.delete_message(message.chat.id, status.message_id)
+    if msg_ids:
+        status = bot.send_message(message.chat.id, "🔍 Musiqa yuborilmoqda...")
+        for m_id in msg_ids[:5]:
+            try:
+                bot.copy_message(message.chat.id, CHANNEL_ID, m_id)
+            except Exception as e:
+                print(f"Yuborishda xatolik: {e}")
+        bot.delete_message(message.chat.id, status.message_id)
+    else:
+        # 2. Bazada bo'lmasa, internetdan avto-yuklab kanalga joylaydi va foydalanuvchiga yuboradi
+        download_and_post(query, message.chat.id)
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
