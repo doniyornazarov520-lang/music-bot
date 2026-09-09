@@ -75,7 +75,7 @@ def start_cmd(message):
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
-# ADMIN UCHUN: YouTube'dan avtomatik yuklab kanalga joylash
+# ADMIN UCHUN: Avtomatik yuklab kanalga joylash
 @bot.message_handler(commands=["add"])
 def add_music_auto(message):
     if message.from_user.id != ADMIN_ID:
@@ -84,43 +84,62 @@ def add_music_auto(message):
 
     song_name = message.text.replace("/add", "").strip()
     if not song_name:
-        bot.send_message(message.chat.id, "⚠️ Qo'shiq nomini yozing: `/add Toshkent`", parse_mode="Markdown")
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Qo'shiq nomini yozing: `/add Toshkent`",
+            parse_mode="Markdown",
+        )
         return
 
-    status = bot.send_message(message.chat.id, f"📥 **'{song_name}'** YouTube'dan qidirilmoqda...")
+    status = bot.send_message(
+        message.chat.id, f"📥 **'{song_name}'** qidirilmoqda..."
+    )
 
-   ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'song.%(ext)s',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android', 'web_creator']
-            }
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": "song.%(ext)s",
+        "extractor_args": {
+            "youtube": {"player_client": ["ios", "android", "web_creator"]}
         },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
         }],
-        'quiet': True,
+        "quiet": True,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{song_name}", download=True)['entries'][0]
+            # YouTube va SoundCloud'dan izlash
+            try:
+                info = ydl.extract_info(
+                    f"ytsearch1:{song_name}", download=True
+                )["entries"][0]
+            except Exception:
+                # Agar YouTube bloklasa, SoundCloud'ga o'tish
+                info = ydl.extract_info(
+                    f"scsearch1:{song_name}", download=True
+                )["entries"][0]
+
             filename = "song.mp3"
-            title = info.get('title', 'Musiqa')
-            uploader = info.get('uploader', 'Unknown')
+            title = info.get("title", "Musiqa")
+            uploader = info.get("uploader", "Unknown")
 
-        bot.edit_message_text(f"📤 Kanalga joylanmoqda: **{title}**", message.chat.id, status.message_id, parse_mode="Markdown")
+        bot.edit_message_text(
+            f"📤 Kanalga joylanmoqda: **{title}**",
+            message.chat.id,
+            status.message_id,
+            parse_mode="Markdown",
+        )
 
-        with open(filename, 'rb') as audio:
+        with open(filename, "rb") as audio:
             sent_msg = bot.send_audio(
                 CHANNEL_ID,
                 audio,
                 title=title,
                 performer=uploader,
-                caption=f"🎧 {title}\n🤖 @{bot.get_me().username}"
+                caption=f"🎧 {title}\n🤖 @{bot.get_me().username}",
             )
 
         # Bazaga qo'shish
@@ -129,7 +148,9 @@ def add_music_auto(message):
         if os.path.exists(filename):
             os.remove(filename)
 
-        bot.send_message(message.chat.id, f"✅ Musiqa kanalga joylandi va bazaga saqlandi!")
+        bot.send_message(
+            message.chat.id, "✅ Musiqa kanalga joylandi va bazaga saqlandi!"
+        )
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Yuklashda xatolik yuz berdi: {e}")
